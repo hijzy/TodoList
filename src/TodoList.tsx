@@ -1,0 +1,662 @@
+import { FormEvent, useEffect, useState } from 'react';
+import './TodoList.css';
+import TodoItem from './TodoItem';
+
+type Todo = {
+	id: string;
+	text: string;
+	completed: boolean;
+	editing: boolean;
+	important?: boolean;
+};
+
+type AuthScreen = 'checking' | 'setup' | 'login' | 'ready';
+
+const PRIVATE_TODOS_KEY = 'todos_local_private';
+const CLOUD_CACHE_TODOS_KEY = 'todos_cloud_cache';
+const LEGACY_TODOS_KEY = 'todos';
+const PRIVACY_MODE_KEY = 'privacy_mode';
+const GROUP_IMPORTANT = 'important';
+const GROUP_TASKS = 'tasks';
+const GROUP_COMPLETED = 'completed';
+type GroupName = typeof GROUP_IMPORTANT | typeof GROUP_TASKS | typeof GROUP_COMPLETED;
+
+function createTodoId() {
+	if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+		return crypto.randomUUID();
+	}
+	return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function normalizeTodos(rawTodos: Todo[]) {
+	return rawTodos.map(todo => {
+		if (todo.id) {
+			return todo;
+		}
+		return {
+			...todo,
+			id: createTodoId()
+		};
+	});
+}
+
+function readTodosByKey(key: string) {
+	const saved = localStorage.getItem(key);
+	if (!saved) {
+		return [];
+	}
+	try {
+		return normalizeTodos(JSON.parse(saved) as Todo[]);
+	} catch {
+		return [];
+	}
+}
+
+function readPrivateTodos() {
+	const privateTodos = readTodosByKey(PRIVATE_TODOS_KEY);
+	if (privateTodos.length > 0) {
+		return privateTodos;
+	}
+	return readTodosByKey(LEGACY_TODOS_KEY);
+}
+
+function readCloudCacheTodos() {
+	return readTodosByKey(CLOUD_CACHE_TODOS_KEY);
+}
+
+function TodoList() {
+	const [todos, setTodos] = useState<Todo[]>(() => readPrivateTodos());
+	const [isPrivacyMode, setIsPrivacyMode] = useState<boolean>(() => localStorage.getItem(PRIVACY_MODE_KEY) === 'true');
+	const [isSwitchingMode, setIsSwitchingMode] = useState(false);
+	const [isHydratingRemote, setIsHydratingRemote] = useState(false);
+	const [isRemoteAvailable, setIsRemoteAvailable] = useState(true);
+	const [authScreen, setAuthScreen] = useState<AuthScreen>('checking');
+	const [authPassword, setAuthPassword] = useState('');
+	const [authError, setAuthError] = useState('');
+	const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+	const [draggingTodoId, setDraggingTodoId] = useState('');
+	const [draggingGroup, setDraggingGroup] = useState<GroupName | ''>('');
+	const [dropBeforeTodoId, setDropBeforeTodoId] = useState('');
+	const isAuthorized = authScreen === 'ready';
+
+	function getGroupName(todo: Todo): GroupName {
+		if (todo.completed) {
+			return GROUP_COMPLETED;
+		}
+		if (todo.important) {
+			return GROUP_IMPORTANT;
+		}
+		return GROUP_TASKS;
+	}
+
+	function reorderTodoInGroup(movedTodoId: string, targetGroup: GroupName, beforeTodoId?: string) {
+		setTodos(previousTodos => {
+			const movedTodo = previousTodos.find(todo => todo.id === movedTodoId);
+			if (!movedTodo) {
+				return previousTodos;
+			}
+			if (getGroupName(movedTodo) !== targetGroup) {
+				return previousTodos;
+			}
+			const todoWithoutMoved = previousTodos.filter(todo => todo.id !== movedTodoId);
+			const nextMovedTodo: Todo = movedTodo;
+			const grouped = {
+				[GROUP_IMPORTANT]: todoWithoutMoved.filter(todo => getGroupName(todo) === GROUP_IMPORTANT),
+				[GROUP_TASKS]: todoWithoutMoved.filter(todo => getGroupName(todo) === GROUP_TASKS),
+				[GROUP_COMPLETED]: todoWithoutMoved.filter(todo => getGroupName(todo) === GROUP_COMPLETED)
+			};
+			const targetTodos = grouped[targetGroup];
+			if (beforeTodoId) {
+				const targetIndex = targetTodos.findIndex(todo => todo.id === beforeTodoId);
+				if (targetIndex >= 0) {
+					targetTodos.splice(targetIndex, 0, nextMovedTodo);
+				} else {
+					targetTodos.push(nextMovedTodo);
+				}
+			} else {
+				targetTodos.push(nextMovedTodo);
+			}
+			return [...grouped[GROUP_IMPORTANT], ...grouped[GROUP_TASKS], ...grouped[GROUP_COMPLETED]];
+		});
+	}
+
+	function separateTodos() {
+		const importantTodos = todos.filter(todo => getGroupName(todo) === GROUP_IMPORTANT);
+		const taskTodos = todos.filter(todo => getGroupName(todo) === GROUP_TASKS);
+		const completedTodos = todos.filter(todo => getGroupName(todo) === GROUP_COMPLETED);
+		return { importantTodos, taskTodos, completedTodos };
+	}
+
+	function handleAddTodo(event: FormEvent<HTMLFormElement>) {
+		event.preventDefault();
+		const input = event.currentTarget.elements.namedItem('todo');
+		if (!(input instanceof HTMLInputElement)) {
+			return;
+		}
+		const value = input.value.trim();
+		if (!value) {
+			return;
+		}
+		const todo: Todo = {
+			id: createTodoId(),
+			text: value,
+			completed: false,
+			editing: false
+		};
+		setTodos([todo, ...todos]);
+		input.value = '';
+	}
+
+	function handleCompleteTodo(todo: Todo) {
+		const newTodos = todos.map(t => (t.id === todo.id ? { ...t, completed: !t.completed } : t));
+		setTodos(newTodos);
+	}
+
+	function handleDeleteTodo(todo: Todo) {
+		const newTodos = todos.filter(t => t.id !== todo.id);
+		setTodos(newTodos);
+	}
+
+	function handleClear() {
+		setTodos([]);
+	}
+
+	useEffect(() => {
+		let cancelled = false;
+		fetch('/api/auth/status')
+			.then(response => {
+				if (!response.ok) {
+					throw new Error('auth status failed');
+				}
+				return response.json() as Promise<{ initialized: boolean; authenticated: boolean }>;
+			})
+			.then(result => {
+				if (cancelled) {
+					return;
+				}
+				if (!result.initialized) {
+					setAuthScreen('setup');
+					return;
+				}
+				if (result.authenticated) {
+					setAuthScreen('ready');
+					return;
+				}
+				setAuthScreen('login');
+			})
+			.catch(() => {
+				if (cancelled) {
+					return;
+				}
+				setAuthScreen('login');
+				setAuthError('Server unavailable, please retry.');
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	function submitAuthForm(event: FormEvent<HTMLFormElement>) {
+		event.preventDefault();
+		if (authScreen !== 'setup' && authScreen !== 'login') {
+			return;
+		}
+		const safePassword = authPassword.trim();
+		if (!safePassword) {
+			setAuthError('Password is required.');
+			return;
+		}
+		setAuthError('');
+		setIsAuthSubmitting(true);
+		const endpoint = authScreen === 'setup' ? '/api/auth/setup' : '/api/auth/login';
+		fetch(endpoint, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify({ password: safePassword })
+		})
+			.then(response => {
+				if (!response.ok) {
+					throw new Error(authScreen === 'setup' ? 'setup failed' : 'login failed');
+				}
+				setAuthPassword('');
+				setAuthScreen('ready');
+				setIsRemoteAvailable(true);
+			})
+			.catch(() => {
+				setAuthError(authScreen === 'setup' ? 'Setup failed.' : 'Wrong password.');
+			})
+			.finally(() => {
+				setIsAuthSubmitting(false);
+			});
+	}
+
+	function handleLogout() {
+		fetch('/api/auth/logout', { method: 'POST' }).finally(() => {
+			setAuthScreen('login');
+			setAuthPassword('');
+			setAuthError('');
+		});
+	}
+
+	useEffect(() => {
+		if (!isAuthorized) {
+			return;
+		}
+		if (isSwitchingMode) {
+			return;
+		}
+		if (isPrivacyMode) {
+			localStorage.setItem(PRIVATE_TODOS_KEY, JSON.stringify(todos));
+			return;
+		}
+		localStorage.setItem(CLOUD_CACHE_TODOS_KEY, JSON.stringify(todos));
+	}, [todos, isPrivacyMode, isSwitchingMode, isAuthorized]);
+
+	useEffect(() => {
+		if (!isAuthorized) {
+			return;
+		}
+		let cancelled = false;
+		if (isPrivacyMode) {
+			setTodos(readPrivateTodos());
+			setIsHydratingRemote(false);
+			setIsSwitchingMode(false);
+			return;
+		}
+		setIsHydratingRemote(true);
+		fetch('/api/todos')
+			.then(response => {
+				if (response.status === 401) {
+					setAuthScreen('login');
+					setAuthError('Session expired, please sign in again.');
+					throw new Error('unauthorized');
+				}
+				if (!response.ok) {
+					throw new Error('remote read failed');
+				}
+				return response.json() as Promise<Todo[]>;
+			})
+			.then(remoteTodos => {
+				if (cancelled) {
+					return;
+				}
+				const safeTodos = Array.isArray(remoteTodos) ? remoteTodos : [];
+				const normalized = normalizeTodos(safeTodos);
+				setTodos(normalized);
+				localStorage.setItem(CLOUD_CACHE_TODOS_KEY, JSON.stringify(normalized));
+				setIsRemoteAvailable(true);
+			})
+			.catch(() => {
+				if (cancelled) {
+					return;
+				}
+				setTodos(readCloudCacheTodos());
+				setIsRemoteAvailable(false);
+			})
+			.finally(() => {
+				if (cancelled) {
+					return;
+				}
+				setIsHydratingRemote(false);
+				setIsSwitchingMode(false);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, [isPrivacyMode, isAuthorized]);
+
+	useEffect(() => {
+		if (!isAuthorized) {
+			return;
+		}
+		if (isPrivacyMode || isHydratingRemote || isSwitchingMode) {
+			return;
+		}
+		fetch('/api/todos', {
+			method: 'PUT',
+			headers: {
+				'Content-Type': 'application/json'
+			},
+			body: JSON.stringify(todos)
+		})
+			.then(response => {
+				if (response.status === 401) {
+					setAuthScreen('login');
+					setAuthError('Session expired, please sign in again.');
+					throw new Error('unauthorized');
+				}
+				if (!response.ok) {
+					throw new Error('remote write failed');
+				}
+				setIsRemoteAvailable(true);
+			})
+			.catch(() => {
+				setIsRemoteAvailable(false);
+			});
+	}, [todos, isPrivacyMode, isHydratingRemote, isSwitchingMode, isAuthorized]);
+
+	function handleEditTodo(todo: Todo) {
+		const newTodos = todos.map(t => (t.id === todo.id ? { ...t, editing: true } : t));
+		setTodos(newTodos);
+	}
+
+	function handleSaveTodo(todo: Todo, event: FormEvent<HTMLFormElement>) {
+		event.preventDefault();
+		const input = event.currentTarget.elements.namedItem('editTodo');
+		if (!(input instanceof HTMLInputElement)) {
+			return;
+		}
+		const value = input.value.trim();
+		if (!value) {
+			return;
+		}
+		const newTodos = todos.map(t => (t.id === todo.id ? { ...t, text: value, editing: false } : t));
+		setTodos(newTodos);
+	}
+
+	function handleMarkImportant(todo: Todo) {
+		const newTodos = todos.map(t => (t.id === todo.id ? { ...t, important: !t.important } : t));
+		setTodos(newTodos);
+	}
+
+	function toggleAddTodoVisibility() {
+		const addTodoContainer = document.querySelector('.add-todo-container');
+		if (!(addTodoContainer instanceof HTMLElement)) {
+			return;
+		}
+		addTodoContainer.classList.toggle('show');
+	}
+
+	function togglePrivacyMode() {
+		setIsSwitchingMode(true);
+		const next = !isPrivacyMode;
+		if (!next) {
+			setIsHydratingRemote(true);
+		}
+		localStorage.setItem(PRIVACY_MODE_KEY, String(next));
+		setIsPrivacyMode(next);
+	}
+
+	const { importantTodos, taskTodos, completedTodos } = separateTodos();
+
+	if (authScreen !== 'ready') {
+		return (
+			<div className="main auth-main">
+				<div className="auth-card">
+					<h1>{authScreen === 'setup' ? 'Set Access Password' : authScreen === 'login' ? 'Enter Access Password' : 'Checking Access'}</h1>
+					{authScreen === 'checking' ? (
+						<p className="sync-state">Checking authentication status...</p>
+					) : (
+						<form className="auth-form" onSubmit={submitAuthForm}>
+							<input
+								type="password"
+								name="authPassword"
+								value={authPassword}
+								onChange={event => setAuthPassword(event.target.value)}
+								autoComplete={authScreen === 'setup' ? 'new-password' : 'current-password'}
+								placeholder={authScreen === 'setup' ? 'Create password' : 'Input password'}
+								className="auth-input"
+							/>
+							<button type="submit" disabled={isAuthSubmitting}>
+								{isAuthSubmitting ? 'Please wait...' : authScreen === 'setup' ? 'Set Password' : 'Unlock'}
+							</button>
+						</form>
+					)}
+					{authError && <p className="sync-state">{authError}</p>}
+				</div>
+			</div>
+		);
+	}
+
+	return (
+		<div className="main">
+			<div className="top">
+				<button
+					className={`cloud-toggle ${isPrivacyMode ? 'privacy' : 'cloud'} ${isSwitchingMode ? 'is-switching' : ''}`}
+					onClick={togglePrivacyMode}
+					type="button"
+					disabled={isSwitchingMode}
+					aria-busy={isSwitchingMode}
+				>
+					<svg width="24" height="24" viewBox="0 0 24 24">
+						<path d="M19 18.5H6.5a4.5 4.5 0 1 1 .8-8.93A6 6 0 0 1 19 11a3.75 3.75 0 0 1 0 7.5z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+						{isPrivacyMode && <path d="M5 19L19 5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />}
+					</svg>
+				</button>
+				<h1 className="top-title">Todo List</h1>
+				<div className="top-spacer" />
+				<button className="logout-button" onClick={handleLogout} type="button">
+					Lock
+				</button>
+			</div>
+			{isSwitchingMode && <p className="sync-state">Syncing mode, please wait...</p>}
+			{!isPrivacyMode && !isRemoteAvailable && <p className="sync-state">Server unavailable, currently showing local cache.</p>}
+			{isPrivacyMode && <p className="sync-state">Privacy mode enabled, using browser cache only.</p>}
+
+			{importantTodos.length > 0 && (
+				<>
+					<h2>Important</h2>
+					<ul
+						onDragOver={event => {
+							if (draggingGroup === GROUP_IMPORTANT) {
+								event.preventDefault();
+							}
+						}}
+						onDrop={event => {
+							event.preventDefault();
+							if (!draggingTodoId || draggingGroup !== GROUP_IMPORTANT) {
+								return;
+							}
+							reorderTodoInGroup(draggingTodoId, GROUP_IMPORTANT);
+							setDraggingTodoId('');
+							setDraggingGroup('');
+							setDropBeforeTodoId('');
+						}}
+					>
+						{importantTodos.map(todo => (
+							<TodoItem
+								key={todo.id}
+								todo={todo}
+								handleCompleteTodo={() => handleCompleteTodo(todo)}
+								handleEditTodo={() => handleEditTodo(todo)}
+								handleSaveTodo={event => handleSaveTodo(todo, event)}
+								handleDeleteTodo={() => handleDeleteTodo(todo)}
+								handleMarkImportant={() => handleMarkImportant(todo)}
+								onDragStart={() => {
+									setDraggingTodoId(todo.id);
+									setDraggingGroup(GROUP_IMPORTANT);
+								}}
+								onDragEnd={() => {
+									setDraggingTodoId('');
+									setDraggingGroup('');
+									setDropBeforeTodoId('');
+								}}
+								onDragOver={event => {
+									if (draggingGroup !== GROUP_IMPORTANT || draggingTodoId === todo.id) {
+										return;
+									}
+									event.preventDefault();
+									setDropBeforeTodoId(todo.id);
+								}}
+								onDrop={event => {
+									event.preventDefault();
+									if (!draggingTodoId || draggingTodoId === todo.id || draggingGroup !== GROUP_IMPORTANT) {
+										return;
+									}
+									reorderTodoInGroup(draggingTodoId, GROUP_IMPORTANT, todo.id);
+									setDraggingTodoId('');
+									setDraggingGroup('');
+									setDropBeforeTodoId('');
+								}}
+								isDropTarget={dropBeforeTodoId === todo.id}
+								isDragging={draggingTodoId === todo.id}
+							/>
+						))}
+					</ul>
+				</>
+			)}
+
+			<h2>Tasks</h2>
+
+			<ul
+				onDragOver={event => {
+					if (draggingGroup === GROUP_TASKS) {
+						event.preventDefault();
+					}
+				}}
+				onDrop={event => {
+					event.preventDefault();
+					if (!draggingTodoId || draggingGroup !== GROUP_TASKS) {
+						return;
+					}
+					reorderTodoInGroup(draggingTodoId, GROUP_TASKS);
+					setDraggingTodoId('');
+					setDraggingGroup('');
+					setDropBeforeTodoId('');
+				}}
+			>
+				{taskTodos.map(todo => (
+					<TodoItem
+						key={todo.id}
+						todo={todo}
+						handleCompleteTodo={() => handleCompleteTodo(todo)}
+						handleEditTodo={() => handleEditTodo(todo)}
+						handleSaveTodo={event => handleSaveTodo(todo, event)}
+						handleDeleteTodo={() => handleDeleteTodo(todo)}
+						handleMarkImportant={() => handleMarkImportant(todo)}
+						onDragStart={() => {
+							setDraggingTodoId(todo.id);
+							setDraggingGroup(GROUP_TASKS);
+						}}
+						onDragEnd={() => {
+							setDraggingTodoId('');
+							setDraggingGroup('');
+							setDropBeforeTodoId('');
+						}}
+						onDragOver={event => {
+							if (draggingGroup !== GROUP_TASKS || draggingTodoId === todo.id) {
+								return;
+							}
+							event.preventDefault();
+							setDropBeforeTodoId(todo.id);
+						}}
+						onDrop={event => {
+							event.preventDefault();
+							if (!draggingTodoId || draggingTodoId === todo.id || draggingGroup !== GROUP_TASKS) {
+								return;
+							}
+							reorderTodoInGroup(draggingTodoId, GROUP_TASKS, todo.id);
+							setDraggingTodoId('');
+							setDraggingGroup('');
+							setDropBeforeTodoId('');
+						}}
+						isDropTarget={dropBeforeTodoId === todo.id}
+						isDragging={draggingTodoId === todo.id}
+					/>
+				))}
+			</ul>
+
+			{completedTodos.length > 0 && (
+				<>
+					<h2>Completed</h2>
+					<ul
+						onDragOver={event => {
+							if (draggingGroup === GROUP_COMPLETED) {
+								event.preventDefault();
+							}
+						}}
+						onDrop={event => {
+							event.preventDefault();
+							if (!draggingTodoId || draggingGroup !== GROUP_COMPLETED) {
+								return;
+							}
+							reorderTodoInGroup(draggingTodoId, GROUP_COMPLETED);
+							setDraggingTodoId('');
+							setDraggingGroup('');
+							setDropBeforeTodoId('');
+						}}
+					>
+						{completedTodos.map(todo => (
+							<TodoItem
+								key={todo.id}
+								todo={todo}
+								handleCompleteTodo={() => handleCompleteTodo(todo)}
+								handleEditTodo={() => handleEditTodo(todo)}
+								handleSaveTodo={event => handleSaveTodo(todo, event)}
+								handleDeleteTodo={() => handleDeleteTodo(todo)}
+								handleMarkImportant={() => handleMarkImportant(todo)}
+								onDragStart={() => {
+									setDraggingTodoId(todo.id);
+									setDraggingGroup(GROUP_COMPLETED);
+								}}
+								onDragEnd={() => {
+									setDraggingTodoId('');
+									setDraggingGroup('');
+									setDropBeforeTodoId('');
+								}}
+								onDragOver={event => {
+									if (draggingGroup !== GROUP_COMPLETED || draggingTodoId === todo.id) {
+										return;
+									}
+									event.preventDefault();
+									setDropBeforeTodoId(todo.id);
+								}}
+								onDrop={event => {
+									event.preventDefault();
+									if (!draggingTodoId || draggingTodoId === todo.id || draggingGroup !== GROUP_COMPLETED) {
+										return;
+									}
+									reorderTodoInGroup(draggingTodoId, GROUP_COMPLETED, todo.id);
+									setDraggingTodoId('');
+									setDraggingGroup('');
+									setDropBeforeTodoId('');
+								}}
+								isDropTarget={dropBeforeTodoId === todo.id}
+								isDragging={draggingTodoId === todo.id}
+							/>
+						))}
+					</ul>
+				</>
+			)}
+
+			{importantTodos.length === 0 && taskTodos.length === 0 && completedTodos.length === 0 && (
+				<div className="done">
+					<p className="empty-state">No todo items yet.</p>
+				</div>
+			)}
+
+			<form onSubmit={handleAddTodo} className="add-todo-container">
+				<button type="button" onClick={toggleAddTodoVisibility} className="no-fill-icon-button">
+					<svg xmlns="http://www.w3.org/2000/svg" className="ionicon" viewBox="0 0 512 512">
+						<title>Close</title>
+						<path fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="32" d="M368 368L144 144M368 144L144 368" />
+					</svg>
+				</button>
+
+				<input type="text" name="todo" id="todo-input" autoComplete="off" className="add-input" placeholder="What do you need to do?" />
+				<button type="submit" className="add-button" onClick={toggleAddTodoVisibility}>
+					<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 16 16" fill="none">
+						<path d="M8 3.5V12.5M12.5 8H3.5" stroke="white" strokeLinecap="round" strokeLinejoin="round" />
+					</svg>
+					<span>Add</span>
+				</button>
+			</form>
+
+			<button onClick={toggleAddTodoVisibility} className="mobile-toggle-drawer">
+				<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="none">
+					<path d="M8 3.5V12.5M12.5 8H3.5" stroke="white" strokeLinecap="round" strokeLinejoin="round" />
+				</svg>
+			</button>
+
+			{todos.length > 0 && (
+				<button onClick={handleClear} className="clear-button">
+					Clear All
+				</button>
+			)}
+		</div>
+	);
+}
+
+export default TodoList;
