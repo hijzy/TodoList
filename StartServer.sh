@@ -8,7 +8,7 @@ RUNTIME_DIR="dist/runtime"
 PID_FILE="${RUNTIME_DIR}/TodoServer.pid"
 LOG_FILE="${RUNTIME_DIR}/TodoServer.log"
 LEGACY_PID_FILE="runtime/TodoServer.pid"
-AUTH_FILE="backend/Auth.json"
+AUTH_FILE="data/Auth.json"
 
 if ! command -v npm >/dev/null 2>&1; then
   if command -v brew >/dev/null 2>&1; then

@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { DragEvent, FormEvent, useEffect, useState } from 'react';
 import './TodoList.css';
 import TodoItem from './TodoItem';
 
@@ -120,6 +120,42 @@ function TodoList() {
 		});
 	}
 
+	function clearDragState() {
+		setDraggingTodoId('');
+		setDraggingGroup('');
+		setDropBeforeTodoId('');
+	}
+
+	function getDropBeforeId(event: DragEvent<HTMLUListElement>) {
+		const listElement = event.currentTarget;
+		const todoElements = Array.from(listElement.querySelectorAll<HTMLLIElement>('.todo-item:not(.dragging)'));
+		for (const todoElement of todoElements) {
+			const rect = todoElement.getBoundingClientRect();
+			if (event.clientY < rect.top + rect.height / 2) {
+				return todoElement.dataset.todoId || '';
+			}
+		}
+		return '';
+	}
+
+	function handleGroupDragOver(event: DragEvent<HTMLUListElement>, groupName: GroupName) {
+		if (draggingGroup !== groupName || !draggingTodoId) {
+			return;
+		}
+		event.preventDefault();
+		setDropBeforeTodoId(getDropBeforeId(event));
+	}
+
+	function handleGroupDrop(event: DragEvent<HTMLUListElement>, groupName: GroupName) {
+		event.preventDefault();
+		if (!draggingTodoId || draggingGroup !== groupName) {
+			return;
+		}
+		const beforeTodoId = getDropBeforeId(event);
+		reorderTodoInGroup(draggingTodoId, groupName, beforeTodoId || undefined);
+		clearDragState();
+	}
+
 	function separateTodos() {
 		const importantTodos = todos.filter(todo => getGroupName(todo) === GROUP_IMPORTANT);
 		const taskTodos = todos.filter(todo => getGroupName(todo) === GROUP_TASKS);
@@ -216,16 +252,31 @@ function TodoList() {
 			},
 			body: JSON.stringify({ password: safePassword })
 		})
-			.then(response => {
+			.then(async response => {
 				if (!response.ok) {
-					throw new Error(authScreen === 'setup' ? 'setup failed' : 'login failed');
+					let message = authScreen === 'setup' ? 'Setup failed.' : 'Wrong password.';
+					try {
+						const payload = (await response.json()) as { message?: unknown };
+						if (typeof payload.message === 'string' && payload.message) {
+							message = payload.message;
+						}
+					} catch {
+						if (response.status >= 500) {
+							message = 'Server unavailable, please retry.';
+						}
+					}
+					throw new Error(message);
 				}
 				setAuthPassword('');
 				setAuthScreen('ready');
 				setIsRemoteAvailable(true);
 			})
-			.catch(() => {
-				setAuthError(authScreen === 'setup' ? 'Setup failed.' : 'Wrong password.');
+			.catch(error => {
+				if (error instanceof Error) {
+					setAuthError(error.message);
+					return;
+				}
+				setAuthError('Server unavailable, please retry.');
 			})
 			.finally(() => {
 				setIsAuthSubmitting(false);
@@ -439,21 +490,8 @@ function TodoList() {
 				<>
 					<h2>Important</h2>
 					<ul
-						onDragOver={event => {
-							if (draggingGroup === GROUP_IMPORTANT) {
-								event.preventDefault();
-							}
-						}}
-						onDrop={event => {
-							event.preventDefault();
-							if (!draggingTodoId || draggingGroup !== GROUP_IMPORTANT) {
-								return;
-							}
-							reorderTodoInGroup(draggingTodoId, GROUP_IMPORTANT);
-							setDraggingTodoId('');
-							setDraggingGroup('');
-							setDropBeforeTodoId('');
-						}}
+						onDragOver={event => handleGroupDragOver(event, GROUP_IMPORTANT)}
+						onDrop={event => handleGroupDrop(event, GROUP_IMPORTANT)}
 					>
 						{importantTodos.map(todo => (
 							<TodoItem
@@ -469,9 +507,7 @@ function TodoList() {
 									setDraggingGroup(GROUP_IMPORTANT);
 								}}
 								onDragEnd={() => {
-									setDraggingTodoId('');
-									setDraggingGroup('');
-									setDropBeforeTodoId('');
+									clearDragState();
 								}}
 								onDragOver={event => {
 									if (draggingGroup !== GROUP_IMPORTANT || draggingTodoId === todo.id) {
@@ -486,9 +522,7 @@ function TodoList() {
 										return;
 									}
 									reorderTodoInGroup(draggingTodoId, GROUP_IMPORTANT, todo.id);
-									setDraggingTodoId('');
-									setDraggingGroup('');
-									setDropBeforeTodoId('');
+									clearDragState();
 								}}
 								isDropTarget={dropBeforeTodoId === todo.id}
 								isDragging={draggingTodoId === todo.id}
@@ -501,21 +535,8 @@ function TodoList() {
 			<h2>Tasks</h2>
 
 			<ul
-				onDragOver={event => {
-					if (draggingGroup === GROUP_TASKS) {
-						event.preventDefault();
-					}
-				}}
-				onDrop={event => {
-					event.preventDefault();
-					if (!draggingTodoId || draggingGroup !== GROUP_TASKS) {
-						return;
-					}
-					reorderTodoInGroup(draggingTodoId, GROUP_TASKS);
-					setDraggingTodoId('');
-					setDraggingGroup('');
-					setDropBeforeTodoId('');
-				}}
+				onDragOver={event => handleGroupDragOver(event, GROUP_TASKS)}
+				onDrop={event => handleGroupDrop(event, GROUP_TASKS)}
 			>
 				{taskTodos.map(todo => (
 					<TodoItem
@@ -531,9 +552,7 @@ function TodoList() {
 							setDraggingGroup(GROUP_TASKS);
 						}}
 						onDragEnd={() => {
-							setDraggingTodoId('');
-							setDraggingGroup('');
-							setDropBeforeTodoId('');
+							clearDragState();
 						}}
 						onDragOver={event => {
 							if (draggingGroup !== GROUP_TASKS || draggingTodoId === todo.id) {
@@ -548,9 +567,7 @@ function TodoList() {
 								return;
 							}
 							reorderTodoInGroup(draggingTodoId, GROUP_TASKS, todo.id);
-							setDraggingTodoId('');
-							setDraggingGroup('');
-							setDropBeforeTodoId('');
+							clearDragState();
 						}}
 						isDropTarget={dropBeforeTodoId === todo.id}
 						isDragging={draggingTodoId === todo.id}
@@ -562,21 +579,8 @@ function TodoList() {
 				<>
 					<h2>Completed</h2>
 					<ul
-						onDragOver={event => {
-							if (draggingGroup === GROUP_COMPLETED) {
-								event.preventDefault();
-							}
-						}}
-						onDrop={event => {
-							event.preventDefault();
-							if (!draggingTodoId || draggingGroup !== GROUP_COMPLETED) {
-								return;
-							}
-							reorderTodoInGroup(draggingTodoId, GROUP_COMPLETED);
-							setDraggingTodoId('');
-							setDraggingGroup('');
-							setDropBeforeTodoId('');
-						}}
+						onDragOver={event => handleGroupDragOver(event, GROUP_COMPLETED)}
+						onDrop={event => handleGroupDrop(event, GROUP_COMPLETED)}
 					>
 						{completedTodos.map(todo => (
 							<TodoItem
@@ -592,9 +596,7 @@ function TodoList() {
 									setDraggingGroup(GROUP_COMPLETED);
 								}}
 								onDragEnd={() => {
-									setDraggingTodoId('');
-									setDraggingGroup('');
-									setDropBeforeTodoId('');
+									clearDragState();
 								}}
 								onDragOver={event => {
 									if (draggingGroup !== GROUP_COMPLETED || draggingTodoId === todo.id) {
@@ -609,9 +611,7 @@ function TodoList() {
 										return;
 									}
 									reorderTodoInGroup(draggingTodoId, GROUP_COMPLETED, todo.id);
-									setDraggingTodoId('');
-									setDraggingGroup('');
-									setDropBeforeTodoId('');
+									clearDragState();
 								}}
 								isDropTarget={dropBeforeTodoId === todo.id}
 								isDragging={draggingTodoId === todo.id}

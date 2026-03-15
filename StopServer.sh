@@ -6,7 +6,7 @@ cd "$ROOT_DIR"
 
 PID_FILE="dist/runtime/TodoServer.pid"
 LEGACY_PID_FILE="runtime/TodoServer.pid"
-AUTH_FILE="backend/Auth.json"
+AUTH_FILE="data/Auth.json"
 
 if [ ! -f "$PID_FILE" ] && [ -f "$LEGACY_PID_FILE" ]; then
   PID_FILE="$LEGACY_PID_FILE"

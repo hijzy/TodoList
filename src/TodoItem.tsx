@@ -45,12 +45,31 @@ function TodoItem(props: TodoItemProps) {
 	return (
 		<li
 			className={`${props.todo.completed ? 'todo-item completed' : props.todo.editing ? 'todo-item is-editing' : 'todo-item'} ${props.isDragging ? 'dragging' : ''} ${props.isDropTarget ? 'drop-before' : ''}`}
-			draggable
-			onDragStart={props.onDragStart}
-			onDragEnd={props.onDragEnd}
+			data-todo-id={props.todo.id}
 			onDragOver={props.onDragOver}
 			onDrop={props.onDrop}
 		>
+			<button
+				type="button"
+				className="drag-handle"
+				draggable
+				onDragStart={event => {
+					event.dataTransfer.setData('text/plain', props.todo.id);
+					event.dataTransfer.effectAllowed = 'move';
+					props.onDragStart();
+				}}
+				onDragEnd={props.onDragEnd}
+				aria-label="Drag todo"
+			>
+				<svg viewBox="0 0 24 24" width="16" height="16">
+					<circle cx="8" cy="6" r="1.5" />
+					<circle cx="16" cy="6" r="1.5" />
+					<circle cx="8" cy="12" r="1.5" />
+					<circle cx="16" cy="12" r="1.5" />
+					<circle cx="8" cy="18" r="1.5" />
+					<circle cx="16" cy="18" r="1.5" />
+				</svg>
+			</button>
 			{props.todo.completed ? (
 				<div className="tooltip-wrapper">
 					<button onClick={props.handleCompleteTodo} className="complete-button">

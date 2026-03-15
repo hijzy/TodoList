@@ -18,9 +18,12 @@ type AuthConfig = {
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const dataFile = join(__dirname, 'Todos.json');
-const authFile = join(__dirname, 'Auth.json');
 const projectRoot = resolve(__dirname, '..');
+const dataDir = join(projectRoot, 'data');
+const dataFile = join(dataDir, 'Todos.json');
+const authFile = join(dataDir, 'Auth.json');
+const legacyDataFile = join(__dirname, 'Todos.json');
+const legacyAuthFile = join(__dirname, 'Auth.json');
 const distDir = join(projectRoot, 'dist');
 const port = Number(process.env.TODO_SERVER_PORT || 8081);
 const sessionCookieName = 'todo_session';
@@ -28,12 +31,22 @@ const sessionMaxAgeSeconds = 60 * 60 * 24 * 30;
 const sessions = new Map<string, number>();
 
 async function ensureStorage() {
-	await mkdir(__dirname, { recursive: true });
+	await mkdir(dataDir, { recursive: true });
 	if (!existsSync(dataFile)) {
-		await writeFile(dataFile, '[]', 'utf-8');
+		if (existsSync(legacyDataFile)) {
+			const legacyTodos = await readFile(legacyDataFile, 'utf-8');
+			await writeFile(dataFile, legacyTodos, 'utf-8');
+		} else {
+			await writeFile(dataFile, '[]', 'utf-8');
+		}
 	}
 	if (!existsSync(authFile)) {
-		await writeFile(authFile, 'null', 'utf-8');
+		if (existsSync(legacyAuthFile)) {
+			const legacyAuth = await readFile(legacyAuthFile, 'utf-8');
+			await writeFile(authFile, legacyAuth, 'utf-8');
+		} else {
+			await writeFile(authFile, 'null', 'utf-8');
+		}
 	}
 }
 
@@ -265,7 +278,12 @@ const server = createServer(async (request, response) => {
 		try {
 			const body = await parseRequestBody(request);
 			const password = typeof (body as { password?: unknown }).password === 'string' ? (body as { password: string }).password : '';
-			const passwordHash = hashPassword(password, authConfig.salt);
+			const safePassword = password.trim();
+			if (!safePassword) {
+				sendJson(response, 400, { message: 'Password is required' });
+				return;
+			}
+			const passwordHash = hashPassword(safePassword, authConfig.salt);
 			const expected = Buffer.from(authConfig.passwordHash, 'hex');
 			const actual = Buffer.from(passwordHash, 'hex');
 			if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
