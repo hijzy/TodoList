@@ -63,7 +63,13 @@ npm run build
 mkdir -p "$RUNTIME_DIR"
 
 nohup env TODO_SERVER_PORT="$PORT" npm run server > "$LOG_FILE" 2>&1 &
-echo $! > "$PID_FILE"
-echo "TodoServer started: PID $(cat "$PID_FILE")"
+SERVER_PID=$!
+sleep 1
+if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+  echo "TodoServer failed to start. Check log: $LOG_FILE"
+  exit 1
+fi
+echo "$SERVER_PID" > "$PID_FILE"
+echo "TodoServer started: PID $SERVER_PID"
 echo "API URL: http://localhost:${PORT}/api/todos"
 echo "Frontend URL: http://localhost:${PORT}/"
