@@ -106,6 +106,7 @@ p {
 	transition: 0.3s;
 	word-break: break-all;
 	user-select: text;
+	margin-left: 4px;
 }
 
 .drag-handle {

@@ -22,8 +22,6 @@ const projectRoot = resolve(__dirname, '..');
 const dataDir = join(projectRoot, 'data');
 const dataFile = join(dataDir, 'Todos.json');
 const authFile = join(dataDir, 'Auth.json');
-const legacyDataFile = join(__dirname, 'Todos.json');
-const legacyAuthFile = join(__dirname, 'Auth.json');
 const distDir = join(projectRoot, 'dist');
 const port = Number(process.env.TODO_SERVER_PORT || 8081);
 const sessionCookieName = 'todo_session';
@@ -33,20 +31,10 @@ const sessions = new Map<string, number>();
 async function ensureStorage() {
 	await mkdir(dataDir, { recursive: true });
 	if (!existsSync(dataFile)) {
-		if (existsSync(legacyDataFile)) {
-			const legacyTodos = await readFile(legacyDataFile, 'utf-8');
-			await writeFile(dataFile, legacyTodos, 'utf-8');
-		} else {
-			await writeFile(dataFile, '[]', 'utf-8');
-		}
+		await writeFile(dataFile, '[]', 'utf-8');
 	}
 	if (!existsSync(authFile)) {
-		if (existsSync(legacyAuthFile)) {
-			const legacyAuth = await readFile(legacyAuthFile, 'utf-8');
-			await writeFile(authFile, legacyAuth, 'utf-8');
-		} else {
-			await writeFile(authFile, 'null', 'utf-8');
-		}
+		await writeFile(authFile, 'null', 'utf-8');
 	}
 }
 
