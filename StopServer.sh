@@ -9,6 +9,7 @@ LEGACY_PID_FILE="runtime/TodoServer.pid"
 AUTH_FILE="data/Auth.json"
 PORT="${TODO_SERVER_PORT:-8081}"
 STOPPED_BY_PID=0
+STOPPED_BY_PORT=0
 
 if [ ! -f "$PID_FILE" ] && [ -f "$LEGACY_PID_FILE" ]; then
   PID_FILE="$LEGACY_PID_FILE"
@@ -24,21 +25,22 @@ if [ -n "$PID_FILE" ]; then
     kill "$PID"
     echo "TodoServer stopped: PID $PID"
     STOPPED_BY_PID=1
+    sleep 1
   else
     echo "TodoServer pid file is stale: PID $PID"
   fi
 fi
 
-if [ "$STOPPED_BY_PID" -eq 0 ] && command -v lsof >/dev/null 2>&1; then
+if command -v lsof >/dev/null 2>&1; then
   PORT_PID="$(lsof -tiTCP:${PORT} -sTCP:LISTEN 2>/dev/null | head -n 1)"
   if [ -n "$PORT_PID" ]; then
     kill "$PORT_PID"
     echo "TodoServer stopped by port ${PORT}: PID $PORT_PID"
-    STOPPED_BY_PID=1
+    STOPPED_BY_PORT=1
   fi
 fi
 
-if [ "$STOPPED_BY_PID" -eq 0 ]; then
+if [ "$STOPPED_BY_PID" -eq 0 ] && [ "$STOPPED_BY_PORT" -eq 0 ]; then
   echo "TodoServer is not running"
 fi
 

@@ -69,6 +69,12 @@ if ! kill -0 "$SERVER_PID" 2>/dev/null; then
   echo "TodoServer failed to start. Check log: $LOG_FILE"
   exit 1
 fi
+if command -v lsof >/dev/null 2>&1; then
+  LISTEN_PID="$(lsof -tiTCP:${PORT} -sTCP:LISTEN 2>/dev/null | head -n 1)"
+  if [ -n "$LISTEN_PID" ]; then
+    SERVER_PID="$LISTEN_PID"
+  fi
+fi
 echo "$SERVER_PID" > "$PID_FILE"
 echo "TodoServer started: PID $SERVER_PID"
 echo "API URL: http://localhost:${PORT}/api/todos"
