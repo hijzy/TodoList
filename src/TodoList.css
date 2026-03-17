@@ -27,17 +27,42 @@ body {
 #root {
 	height: calc(100% - 64px);
 	padding: 32px 0;
+	min-height: 100vh;
+}
+
+/* Add a wrapper class for full screen drag tracking */
+.drag-wrapper {
+	min-height: 100vh;
+	width: 100vw;
+	position: fixed; /* Use fixed to cover the entire viewport regardless of scrolling */
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 1; /* Needs to be above the background but below the main content */
 }
 
 .main {
   display: flex;
 	flex-direction: column;
 	max-width: 800px;
-	justify-content: center;
+	justify-content: flex-start;
 	align-items: center;
-	margin: auto;
-	height: 100%;
+	margin: 0 auto;
+	min-height: 100vh;
+	padding-bottom: 200px; /* Give plenty of space at the bottom for dragging */
+	position: relative;
+	z-index: 2; /* Put main content above the drag wrapper */
+	/* Make the main container pass through pointer events to the drag wrapper when dragging over empty space */
+	pointer-events: none;
 }
+
+.main > * {
+	/* Re-enable pointer events for actual content */
+	pointer-events: auto;
+}
+
+/* Remove the old hacky before element */
 
 h2 {
 	margin-bottom: 0;
@@ -71,10 +96,11 @@ ul {
 	border-radius: var(--RadiusLg);
 	padding: 10px 10px;
 	min-height: var(--ControlHeight);
-	transition: 0.3s;
+	transition: background-color 0.25s ease, border-color 0.25s ease, transform 0.22s ease, box-shadow 0.22s ease, opacity 0.2s ease;
 	position: relative;
 	border: 2px solid transparent;
 	cursor: default;
+	will-change: transform;
 }
 
 .todo-item:hover {
@@ -82,12 +108,67 @@ ul {
 }
 
 .todo-item.dragging {
-	opacity: 0.45;
+	opacity: 0;
 	cursor: grabbing;
+	background: transparent;
+	border-color: transparent;
+	/* Collapse logic for "Mac Dock" style immediate fill */
+	height: 0;
+	min-height: 0;
+	padding: 0;
+	margin: 0;
+	overflow: hidden;
+	border: 0;
+	/* Keep transition smooth */
+	transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
 }
 
 .todo-item.drop-before {
-	box-shadow: inset 0 3px 0 0 #1E212F;
+	box-shadow: none;
+}
+
+.todo-item.drag-ghost {
+	position: fixed;
+	top: -10000px;
+	left: -10000px;
+	pointer-events: none;
+	opacity: 1;
+	background: rgba(256 256 256 / 95%);
+	box-shadow: 0 12px 24px -6px rgba(0, 0, 0, 0.15), 0 4px 8px -4px rgba(0, 0, 0, 0.1);
+	transform: none;
+	/* Ensure ghost has standard size */
+	width: 100%;
+	max-width: 800px; /* Match container max-width if needed, but usually fixed is fine */
+	box-sizing: border-box;
+	z-index: 9999;
+}
+
+/* We only need shift-down to make room for insertion */
+.todo-item.shift-down {
+	transform: translateY(calc(var(--ControlHeight) + 20px + 6px)); /* Height + padding + gap */
+}
+
+/* Remove transition from shifted items during drop to avoid snap-back animation */
+.is-dropping .todo-item {
+	transition: none !important;
+}
+
+.todo-item.recently-moved {
+	animation: reordered-item-feedback 0.32s ease;
+}
+
+@keyframes reordered-item-feedback {
+	0% {
+		box-shadow: 0 0 0 0 rgba(30 33 47 / 0%);
+	}
+
+	35% {
+		box-shadow: 0 0 0 3px rgba(30 33 47 / 28%);
+	}
+
+	100% {
+		box-shadow: 0 0 0 0 rgba(30 33 47 / 0%);
+	}
 }
 
 .todo-item.completed {

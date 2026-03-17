@@ -1,4 +1,4 @@
-import { DragEvent, FormEvent, useEffect, useState } from 'react';
+import { DragEvent, FormEvent, useEffect, useRef, useState } from 'react';
 
 type Todo = {
 	id: string;
@@ -21,10 +21,21 @@ type TodoItemProps = {
 	onDrop: (event: DragEvent<HTMLLIElement>) => void;
 	isDragging: boolean;
 	isDropTarget: boolean;
+	shiftDirection: 'up' | 'down' | '';
+	isRecentlyMoved: boolean;
 };
 
 function TodoItem(props: TodoItemProps) {
 	const [dropdownOpen, setDropdownOpen] = useState(false);
+	const dragGhostRef = useRef<HTMLLIElement | null>(null);
+
+	function removeDragGhost() {
+		if (!dragGhostRef.current) {
+			return;
+		}
+		dragGhostRef.current.remove();
+		dragGhostRef.current = null;
+	}
 
 	useEffect(() => {
 		const handleClickOutside = (event: MouseEvent) => {
@@ -39,12 +50,13 @@ function TodoItem(props: TodoItemProps) {
 		document.addEventListener('mousedown', handleClickOutside);
 		return () => {
 			document.removeEventListener('mousedown', handleClickOutside);
+			removeDragGhost();
 		};
 	}, []);
 
 	return (
 		<li
-			className={`${props.todo.completed ? 'todo-item completed' : props.todo.editing ? 'todo-item is-editing' : 'todo-item'} ${props.isDragging ? 'dragging' : ''} ${props.isDropTarget ? 'drop-before' : ''}`}
+			className={`${props.todo.completed ? 'todo-item completed' : props.todo.editing ? 'todo-item is-editing' : 'todo-item'} ${props.isDragging ? 'dragging' : ''} ${props.isDropTarget ? 'drop-before' : ''} ${props.shiftDirection === 'up' ? 'shift-up' : props.shiftDirection === 'down' ? 'shift-down' : ''} ${props.isRecentlyMoved ? 'recently-moved' : ''}`}
 			data-todo-id={props.todo.id}
 			onDragOver={props.onDragOver}
 			onDrop={props.onDrop}
@@ -56,9 +68,25 @@ function TodoItem(props: TodoItemProps) {
 				onDragStart={event => {
 					event.dataTransfer.setData('text/plain', props.todo.id);
 					event.dataTransfer.effectAllowed = 'move';
+					const todoElement = event.currentTarget.closest('li');
+					if (todoElement instanceof HTMLLIElement) {
+						removeDragGhost();
+						const ghost = todoElement.cloneNode(true) as HTMLLIElement;
+						ghost.classList.remove('dragging', 'drop-before', 'shift-up', 'shift-down', 'recently-moved');
+						ghost.classList.add('drag-ghost');
+						ghost.style.width = `${todoElement.offsetWidth}px`;
+						ghost.style.height = `${todoElement.offsetHeight}px`;
+						document.body.appendChild(ghost);
+						dragGhostRef.current = ghost;
+						const rect = todoElement.getBoundingClientRect();
+						event.dataTransfer.setDragImage(ghost, event.clientX - rect.left, event.clientY - rect.top);
+					}
 					props.onDragStart();
 				}}
-				onDragEnd={props.onDragEnd}
+				onDragEnd={() => {
+					removeDragGhost();
+					props.onDragEnd();
+				}}
 				aria-label="Drag todo"
 			>
 				<svg viewBox="0 0 24 24" width="16" height="16">

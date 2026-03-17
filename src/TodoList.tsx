@@ -1,4 +1,4 @@
-import { DragEvent, FormEvent, useEffect, useState } from 'react';
+import { DragEvent, FormEvent, useEffect, useState, useRef } from 'react';
 import './TodoList.css';
 import TodoItem from './TodoItem';
 
@@ -77,6 +77,13 @@ function TodoList() {
 	const [draggingTodoId, setDraggingTodoId] = useState('');
 	const [draggingGroup, setDraggingGroup] = useState<GroupName | ''>('');
 	const [dropBeforeTodoId, setDropBeforeTodoId] = useState('');
+	const [recentlyMovedTodoId, setRecentlyMovedTodoId] = useState('');
+	// Store drag state in ref to avoid re-renders during rapid drag over events
+	const dragStateRef = useRef({
+		dropBeforeTodoId: '',
+		lastUpdateTime: 0
+	});
+	const [isDropping, setIsDropping] = useState(false);
 	const isAuthorized = authScreen === 'ready';
 
 	function getGroupName(todo: Todo): GroupName {
@@ -118,42 +125,68 @@ function TodoList() {
 			}
 			return [...grouped[GROUP_IMPORTANT], ...grouped[GROUP_TASKS], ...grouped[GROUP_COMPLETED]];
 		});
+		setRecentlyMovedTodoId(movedTodoId);
 	}
 
 	function clearDragState() {
 		setDraggingTodoId('');
 		setDraggingGroup('');
 		setDropBeforeTodoId('');
+		dragStateRef.current.dropBeforeTodoId = '';
 	}
 
-	function getDropBeforeId(event: DragEvent<HTMLUListElement>) {
-		const listElement = event.currentTarget;
-		const todoElements = Array.from(listElement.querySelectorAll<HTMLLIElement>('.todo-item:not(.dragging)'));
-		for (const todoElement of todoElements) {
-			const rect = todoElement.getBoundingClientRect();
-			if (event.clientY < rect.top + rect.height / 2) {
-				return todoElement.dataset.todoId || '';
-			}
+	function getShiftDirection(todoId: string, groupTodos: Todo[], groupName: GroupName): 'up' | 'down' | '' {
+		if (draggingGroup !== groupName || !draggingTodoId) {
+			return '';
 		}
+		// The dragging item itself is collapsed (height: 0), so no shift needed for it
+		if (todoId === draggingTodoId) {
+			return '';
+		}
+		
+		// Find the index where the drop would happen
+		// Since the dragging item is visually "gone" (collapsed), 
+		// we consider the list as if the dragging item isn't there.
+		const visibleTodos = groupTodos.filter(t => t.id !== draggingTodoId);
+		let targetIndex = -1;
+		
+		if (dropBeforeTodoId) {
+			targetIndex = visibleTodos.findIndex(t => t.id === dropBeforeTodoId);
+		} else {
+			// Dropping at the end
+			targetIndex = visibleTodos.length;
+		}
+
+		// If we couldn't find the target (e.g. cross-group drag edge cases), default to end
+		if (targetIndex < 0) {
+			targetIndex = visibleTodos.length;
+		}
+
+		// Current item's index in the "visible" list (excluding the dragging item)
+		const currentIndex = visibleTodos.findIndex(t => t.id === todoId);
+		
+		// If current item is at or after the insertion point, shift it down to make room
+		if (currentIndex >= targetIndex) {
+			return 'down';
+		}
+
 		return '';
 	}
 
-	function handleGroupDragOver(event: DragEvent<HTMLUListElement>, groupName: GroupName) {
-		if (draggingGroup !== groupName || !draggingTodoId) {
-			return;
-		}
-		event.preventDefault();
-		setDropBeforeTodoId(getDropBeforeId(event));
+	function getDropBeforeId(event: DragEvent<HTMLDivElement>) {
+		// Use document.elementsFromPoint to find the todo item under the cursor,
+		// because dragging to the left might be outside the text area but still on the row.
+		// Since we only care about Y axis for ordering, we can just check all items in the list.
+		// We pass activeGroupElement to scope the search to the correct list.
+		return ''; // We moved this logic directly into the global drag over handler
 	}
 
-	function handleGroupDrop(event: DragEvent<HTMLUListElement>, groupName: GroupName) {
-		event.preventDefault();
-		if (!draggingTodoId || draggingGroup !== groupName) {
-			return;
-		}
-		const beforeTodoId = getDropBeforeId(event);
-		reorderTodoInGroup(draggingTodoId, groupName, beforeTodoId || undefined);
-		clearDragState();
+	function handleGroupDragOver(event: DragEvent<HTMLDivElement>, groupName: GroupName) {
+		// This is now handled globally
+	}
+
+	function handleGroupDrop(event: DragEvent<HTMLDivElement>, groupName: GroupName) {
+		// This is now handled globally
 	}
 
 	function separateTodos() {
@@ -231,6 +264,18 @@ function TodoList() {
 			cancelled = true;
 		};
 	}, []);
+
+	useEffect(() => {
+		if (!recentlyMovedTodoId) {
+			return;
+		}
+		const timeoutId = window.setTimeout(() => {
+			setRecentlyMovedTodoId('');
+		}, 320);
+		return () => {
+			window.clearTimeout(timeoutId);
+		};
+	}, [recentlyMovedTodoId]);
 
 	function submitAuthForm(event: FormEvent<HTMLFormElement>) {
 		event.preventDefault();
@@ -462,7 +507,206 @@ function TodoList() {
 	}
 
 	return (
-		<div className="main">
+		<>
+			{/* Add a full-screen background overlay that catches drag events everywhere */}
+			<div 
+				className="drag-wrapper"
+				onDragOver={event => {
+					// Global drag over handler for the entire window to support edge dragging
+					if (!draggingTodoId || !draggingGroup) {
+						return;
+					}
+					event.preventDefault();
+					
+					// Throttle calculations
+					const now = Date.now();
+					if (now - dragStateRef.current.lastUpdateTime < 30) {
+						return;
+					}
+					dragStateRef.current.lastUpdateTime = now;
+
+					// We need to find which group we are currently hovering over
+					// and what the drop target should be based on Y coordinate
+					
+					// Get all possible groups (Important, Tasks, Completed)
+					const listElements = Array.from(document.querySelectorAll<HTMLUListElement>('ul'));
+					let activeGroupElement = null;
+					let targetGroupName = draggingGroup; // Default to current group
+
+					// Find the closest list vertically
+					let minDistance = Infinity;
+					for (const ul of listElements) {
+						const rect = ul.getBoundingClientRect();
+						// If mouse is within the vertical bounds of this list (with some padding)
+						if (event.clientY >= rect.top - 20 && event.clientY <= rect.bottom + 20) {
+							activeGroupElement = ul;
+							break;
+						}
+						
+						// Otherwise track the closest one
+						const distance = Math.min(
+							Math.abs(event.clientY - rect.top),
+							Math.abs(event.clientY - rect.bottom)
+						);
+						if (distance < minDistance) {
+							minDistance = distance;
+							activeGroupElement = ul;
+						}
+					}
+
+					if (!activeGroupElement) return;
+
+					// Determine group name based on previous sibling h2 or structure
+					let newTargetGroupName = draggingGroup;
+					
+					// Search specifically for headers related to the active list
+					if (activeGroupElement.previousElementSibling?.tagName === 'H2') {
+						const text = activeGroupElement.previousElementSibling.textContent;
+						if (text === 'Important') newTargetGroupName = GROUP_IMPORTANT;
+						else if (text === 'Tasks') newTargetGroupName = GROUP_TASKS;
+						else if (text === 'Completed') newTargetGroupName = GROUP_COMPLETED;
+					} else {
+						// Traverse up to see if it's within a specific section
+						const parentText = activeGroupElement.parentElement?.querySelector('h2')?.textContent;
+						if (parentText === 'Important') newTargetGroupName = GROUP_IMPORTANT;
+						else if (parentText === 'Completed') newTargetGroupName = GROUP_COMPLETED;
+						else newTargetGroupName = GROUP_TASKS;
+					}
+
+					// Only allow dragging within the same group
+					if (newTargetGroupName !== draggingGroup) {
+						return;
+					}
+
+					// Calculate beforeId using the active list element
+					const todoElements = Array.from(activeGroupElement.querySelectorAll<HTMLLIElement>('.todo-item:not(.dragging)'));
+					let beforeId = '';
+					
+					// Sort the items to ensure we check them in visual order
+					const sortedElements = todoElements.sort((a, b) => {
+						return a.getBoundingClientRect().top - b.getBoundingClientRect().top;
+					});
+					
+					for (const todoElement of sortedElements) {
+						const rect = todoElement.getBoundingClientRect();
+						// Only check Y coordinate. 
+						// If mouse Y is above the middle of this item, it should be dropped before it
+						if (event.clientY < rect.top + rect.height * 0.5) {
+							beforeId = todoElement.dataset.todoId || '';
+							break;
+						}
+					}
+
+					if (beforeId !== dragStateRef.current.dropBeforeTodoId) {
+						dragStateRef.current.dropBeforeTodoId = beforeId;
+						setDropBeforeTodoId(beforeId);
+					}
+				}}
+				onDrop={event => {
+					if (!draggingTodoId || !draggingGroup) {
+						return;
+					}
+					event.preventDefault();
+					
+					// Handle global drop using current ref state
+				setIsDropping(true);
+				
+				// Reorder only if we're dropping in a valid state
+				// The actual group being dropped into is determined by draggingGroup 
+				// (since we restrict dragging to the same group in onDragOver)
+				reorderTodoInGroup(draggingTodoId, draggingGroup, dragStateRef.current.dropBeforeTodoId || undefined);
+				
+				clearDragState();
+				
+				requestAnimationFrame(() => {
+					requestAnimationFrame(() => {
+						setIsDropping(false);
+					});
+				});
+			}}
+		/>
+		<div 
+			className={`main ${isDropping ? 'is-dropping' : ''}`}
+			style={{ minHeight: '100vh', width: '100%', paddingBottom: '200px' }} // Ensure it takes up space for drag events
+			onDragOver={event => {
+				// Forward drag over events to the global handler
+				if (!draggingTodoId || !draggingGroup) return;
+				event.preventDefault();
+				
+				// We manually trigger the drag-wrapper logic here to ensure
+				// hovering over actual todo items still triggers the layout updates.
+				// Since pointer-events: auto on child elements will intercept the drag,
+				// the wrapper underneath won't get it while hovering the actual cards.
+				
+				// Throttle calculations
+				const now = Date.now();
+				if (now - dragStateRef.current.lastUpdateTime < 30) return;
+				dragStateRef.current.lastUpdateTime = now;
+
+				const listElements = Array.from(document.querySelectorAll<HTMLUListElement>('ul'));
+				let activeGroupElement = null;
+
+				let minDistance = Infinity;
+				for (const ul of listElements) {
+					const rect = ul.getBoundingClientRect();
+					if (event.clientY >= rect.top - 20 && event.clientY <= rect.bottom + 20) {
+						activeGroupElement = ul;
+						break;
+					}
+					const distance = Math.min(
+						Math.abs(event.clientY - rect.top),
+						Math.abs(event.clientY - rect.bottom)
+					);
+					if (distance < minDistance) {
+						minDistance = distance;
+						activeGroupElement = ul;
+					}
+				}
+
+				if (!activeGroupElement) return;
+
+				let newTargetGroupName = draggingGroup;
+				if (activeGroupElement.previousElementSibling?.tagName === 'H2') {
+					const text = activeGroupElement.previousElementSibling.textContent;
+					if (text === 'Important') newTargetGroupName = GROUP_IMPORTANT;
+					else if (text === 'Tasks') newTargetGroupName = GROUP_TASKS;
+					else if (text === 'Completed') newTargetGroupName = GROUP_COMPLETED;
+				} else {
+					const parentText = activeGroupElement.parentElement?.querySelector('h2')?.textContent;
+					if (parentText === 'Important') newTargetGroupName = GROUP_IMPORTANT;
+					else if (parentText === 'Completed') newTargetGroupName = GROUP_COMPLETED;
+					else newTargetGroupName = GROUP_TASKS;
+				}
+
+				if (newTargetGroupName !== draggingGroup) return;
+
+				const todoElements = Array.from(activeGroupElement.querySelectorAll<HTMLLIElement>('.todo-item:not(.dragging)'));
+				let beforeId = '';
+				
+				const sortedElements = todoElements.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
+				
+				for (const todoElement of sortedElements) {
+					const rect = todoElement.getBoundingClientRect();
+					if (event.clientY < rect.top + rect.height * 0.5) {
+						beforeId = todoElement.dataset.todoId || '';
+						break;
+					}
+				}
+
+				if (beforeId !== dragStateRef.current.dropBeforeTodoId) {
+					dragStateRef.current.dropBeforeTodoId = beforeId;
+					setDropBeforeTodoId(beforeId);
+				}
+			}}
+			onDrop={event => {
+				if (!draggingTodoId || !draggingGroup) return;
+				event.preventDefault();
+				setIsDropping(true);
+				reorderTodoInGroup(draggingTodoId, draggingGroup, dragStateRef.current.dropBeforeTodoId || undefined);
+				clearDragState();
+				requestAnimationFrame(() => requestAnimationFrame(() => setIsDropping(false)));
+			}}
+		>
 			<div className="top">
 				<button
 					className={`cloud-toggle ${isPrivacyMode ? 'privacy' : 'cloud'} ${isSwitchingMode ? 'is-switching' : ''}`}
@@ -489,10 +733,7 @@ function TodoList() {
 			{importantTodos.length > 0 && (
 				<>
 					<h2>Important</h2>
-					<ul
-						onDragOver={event => handleGroupDragOver(event, GROUP_IMPORTANT)}
-						onDrop={event => handleGroupDrop(event, GROUP_IMPORTANT)}
-					>
+					<ul>
 						{importantTodos.map(todo => (
 							<TodoItem
 								key={todo.id}
@@ -510,22 +751,15 @@ function TodoList() {
 									clearDragState();
 								}}
 								onDragOver={event => {
-									if (draggingGroup !== GROUP_IMPORTANT || draggingTodoId === todo.id) {
-										return;
-									}
-									event.preventDefault();
-									setDropBeforeTodoId(todo.id);
+									event.preventDefault(); // Keep to allow drop target
 								}}
 								onDrop={event => {
-									event.preventDefault();
-									if (!draggingTodoId || draggingTodoId === todo.id || draggingGroup !== GROUP_IMPORTANT) {
-										return;
-									}
-									reorderTodoInGroup(draggingTodoId, GROUP_IMPORTANT, todo.id);
-									clearDragState();
+									event.preventDefault(); // Keep to allow drop target
 								}}
 								isDropTarget={dropBeforeTodoId === todo.id}
 								isDragging={draggingTodoId === todo.id}
+								shiftDirection={getShiftDirection(todo.id, importantTodos, GROUP_IMPORTANT)}
+								isRecentlyMoved={recentlyMovedTodoId === todo.id}
 							/>
 						))}
 					</ul>
@@ -534,10 +768,7 @@ function TodoList() {
 
 			<h2>Tasks</h2>
 
-			<ul
-				onDragOver={event => handleGroupDragOver(event, GROUP_TASKS)}
-				onDrop={event => handleGroupDrop(event, GROUP_TASKS)}
-			>
+			<ul>
 				{taskTodos.map(todo => (
 					<TodoItem
 						key={todo.id}
@@ -555,22 +786,15 @@ function TodoList() {
 							clearDragState();
 						}}
 						onDragOver={event => {
-							if (draggingGroup !== GROUP_TASKS || draggingTodoId === todo.id) {
-								return;
-							}
 							event.preventDefault();
-							setDropBeforeTodoId(todo.id);
 						}}
 						onDrop={event => {
 							event.preventDefault();
-							if (!draggingTodoId || draggingTodoId === todo.id || draggingGroup !== GROUP_TASKS) {
-								return;
-							}
-							reorderTodoInGroup(draggingTodoId, GROUP_TASKS, todo.id);
-							clearDragState();
 						}}
 						isDropTarget={dropBeforeTodoId === todo.id}
 						isDragging={draggingTodoId === todo.id}
+						shiftDirection={getShiftDirection(todo.id, taskTodos, GROUP_TASKS)}
+						isRecentlyMoved={recentlyMovedTodoId === todo.id}
 					/>
 				))}
 			</ul>
@@ -578,10 +802,7 @@ function TodoList() {
 			{completedTodos.length > 0 && (
 				<>
 					<h2>Completed</h2>
-					<ul
-						onDragOver={event => handleGroupDragOver(event, GROUP_COMPLETED)}
-						onDrop={event => handleGroupDrop(event, GROUP_COMPLETED)}
-					>
+					<ul>
 						{completedTodos.map(todo => (
 							<TodoItem
 								key={todo.id}
@@ -599,22 +820,15 @@ function TodoList() {
 									clearDragState();
 								}}
 								onDragOver={event => {
-									if (draggingGroup !== GROUP_COMPLETED || draggingTodoId === todo.id) {
-										return;
-									}
 									event.preventDefault();
-									setDropBeforeTodoId(todo.id);
 								}}
 								onDrop={event => {
 									event.preventDefault();
-									if (!draggingTodoId || draggingTodoId === todo.id || draggingGroup !== GROUP_COMPLETED) {
-										return;
-									}
-									reorderTodoInGroup(draggingTodoId, GROUP_COMPLETED, todo.id);
-									clearDragState();
 								}}
 								isDropTarget={dropBeforeTodoId === todo.id}
 								isDragging={draggingTodoId === todo.id}
+								shiftDirection={getShiftDirection(todo.id, completedTodos, GROUP_COMPLETED)}
+								isRecentlyMoved={recentlyMovedTodoId === todo.id}
 							/>
 						))}
 					</ul>
@@ -650,12 +864,13 @@ function TodoList() {
 				</svg>
 			</button>
 
-			{todos.length > 0 && (
+			{todos.length > 0 && !draggingTodoId && (
 				<button onClick={handleClear} className="clear-button">
 					Clear All
 				</button>
 			)}
 		</div>
+		</>
 	);
 }
 
