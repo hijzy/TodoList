@@ -1,9 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import TodoList from './TodoList';
+import Workspace from './dashboard';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
 	<React.StrictMode>
-		<TodoList />
+		<Workspace />
 	</React.StrictMode>
 );

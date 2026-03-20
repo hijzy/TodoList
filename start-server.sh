@@ -5,10 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 PORT="${TODO_SERVER_PORT:-8081}"
 RUNTIME_DIR="dist/runtime"
-PID_FILE="${RUNTIME_DIR}/TodoServer.pid"
-LOG_FILE="${RUNTIME_DIR}/TodoServer.log"
-LEGACY_PID_FILE="runtime/TodoServer.pid"
-AUTH_FILE="data/Auth.json"
+PID_FILE="${RUNTIME_DIR}/server.pid"
+LOG_FILE="${RUNTIME_DIR}/server.log"
+AUTH_FILE="data/auth.json"
 
 if ! command -v npm >/dev/null 2>&1; then
   if command -v brew >/dev/null 2>&1; then
@@ -51,11 +50,6 @@ if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
   sleep 1
 fi
 
-if [ -f "$LEGACY_PID_FILE" ] && kill -0 "$(cat "$LEGACY_PID_FILE")" 2>/dev/null; then
-  kill "$(cat "$LEGACY_PID_FILE")"
-  sleep 1
-fi
-
 rm -f "$AUTH_FILE"
 
 npm run build
@@ -66,7 +60,7 @@ nohup env TODO_SERVER_PORT="$PORT" npm run server > "$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 sleep 1
 if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-  echo "TodoServer failed to start. Check log: $LOG_FILE"
+  echo "Server failed to start. Check log: $LOG_FILE"
   exit 1
 fi
 if command -v lsof >/dev/null 2>&1; then
@@ -76,6 +70,5 @@ if command -v lsof >/dev/null 2>&1; then
   fi
 fi
 echo "$SERVER_PID" > "$PID_FILE"
-echo "TodoServer started: PID $SERVER_PID"
-echo "API URL: http://localhost:${PORT}/api/todos"
-echo "Frontend URL: http://localhost:${PORT}/"
+echo "Server started: PID $SERVER_PID"
+echo "App URL: http://localhost:${PORT}/"

@@ -5,7 +5,7 @@
   "description": "React TypeScript on Replit, using Vite bundler",
   "scripts": {
     "dev": "vite",
-    "server": "tsx backend/TodoServer.ts",
+    "server": "tsx backend/server.ts",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
@@ -13,14 +13,21 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/view": "^6.40.0",
+    "busboy": "^1.6.0",
+    "codemirror": "^6.0.2",
+    "highlight.js": "^11.11.1",
+    "markdown-it": "^14.1.1"
   },
   "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
     "@types/node": "^16.18.126",
     "@types/react": "^18.0.15",
     "@types/react-dom": "^18.0.6",
     "@vitejs/plugin-react": "^2.0.0",
     "react": "^18.2.0",
-		"react-dom": "^18.2.0",
+    "react-dom": "^18.2.0",
     "tsx": "^4.20.6",
     "typescript": "^4.7.4",
     "typescript-language-server": "^0.11.2",
