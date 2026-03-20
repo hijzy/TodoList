@@ -114,7 +114,7 @@ export function NotesEditor(props: NotesEditorProps) {
 						keymap.of([indentWithTab, ...closeBracketsKeymap]),
 						markdownLanguage(),
 						theme,
-						EditorView.updateListener.of(update => {
+						EditorView.updateListener.of((update: import('@codemirror/view').ViewUpdate) => {
 							if (update.docChanged) {
 								onChangeRef.current(update.state.doc.toString());
 							}
