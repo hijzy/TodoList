@@ -28,6 +28,10 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
+check_required_modules() {
+  node -e "const required = ['@codemirror/state','@codemirror/view','@codemirror/autocomplete','@codemirror/commands','@codemirror/language','@codemirror/lang-markdown','codemirror','markdown-it','highlight.js']; for (const name of required) { try { require.resolve(name); } catch { process.exit(1); } }"
+}
+
 if [ ! -d node_modules ]; then
   if [ -f package-lock.json ]; then
     npm ci
@@ -35,7 +39,7 @@ if [ ! -d node_modules ]; then
     npm install
   fi
 else
-  if ! node -e "const esbuild = require('esbuild'); esbuild.buildSync({stdin:{contents:'export default 1',resolveDir:process.cwd(),sourcefile:'esbuild-check.js'},write:false,format:'esm'});" >/dev/null 2>&1; then
+  if ! node -e "const esbuild = require('esbuild'); esbuild.buildSync({stdin:{contents:'export default 1',resolveDir:process.cwd(),sourcefile:'esbuild-check.js'},write:false,format:'esm'});" >/dev/null 2>&1 || ! check_required_modules >/dev/null 2>&1; then
     rm -rf node_modules
     if [ -f package-lock.json ]; then
       npm ci

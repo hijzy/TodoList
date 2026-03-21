@@ -945,7 +945,6 @@ function Workspace() {
 						<section className="panel todo-panel">
 						<div className="panel-head">
 							<div>
-								<p className="panel-kicker">Ongoing Tasks</p>
 								<h2 className="panel-title">Todos</h2>
 							</div>
 							<div className="panel-head-actions">
@@ -1054,7 +1053,6 @@ function Workspace() {
 					<section className="panel note-panel">
 						<div className="panel-head">
 							<div>
-								<p className="panel-kicker">Quick Notes</p>
 								<h2 className="panel-title">Notes</h2>
 							</div>
 							<div className="note-switch" role="tablist" aria-label="Notes view">
@@ -1079,7 +1077,6 @@ function Workspace() {
 					<section className="panel file-panel">
 						<div className="panel-head">
 							<div>
-								<p className="panel-kicker">Cloud Inbox</p>
 								<h2 className="panel-title">Files</h2>
 							</div>
 							<div className="panel-head-actions">
