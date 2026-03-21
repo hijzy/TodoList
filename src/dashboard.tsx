@@ -36,20 +36,38 @@ type FileIconConfig = {
 };
 
 type NoteThemeConfig = {
-	background: string;
-	foreground: string;
-	cursorColor: string;
-	cursorText: string;
-	selectionBackground: string;
-	selectionForeground: string;
-	inlineCodeBackground: string;
-	codeBorder: string;
-	comment: string;
-	string: string;
-	number: string;
-	keyword: string;
-	symbol: string;
-	meta: string;
+	background?: string;
+	foreground?: string;
+	cursorColor?: string;
+	cursorText?: string;
+	selectionBackground?: string;
+	selectionForeground?: string;
+	inlineCodeBackground?: string;
+	codeBorder?: string;
+	comment?: string;
+	string?: string;
+	number?: string;
+	keyword?: string;
+	title?: string;
+	builtin?: string;
+	symbol?: string;
+	meta?: string;
+	black?: string;
+	red?: string;
+	green?: string;
+	yellow?: string;
+	blue?: string;
+	purple?: string;
+	cyan?: string;
+	white?: string;
+	brightBlack?: string;
+	brightRed?: string;
+	brightGreen?: string;
+	brightYellow?: string;
+	brightBlue?: string;
+	brightPurple?: string;
+	brightCyan?: string;
+	brightWhite?: string;
 };
 
 type DragPreview = {
@@ -230,6 +248,7 @@ function Workspace() {
 	const [authPassword, setAuthPassword] = useState('');
 	const [authError, setAuthError] = useState('');
 	const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+	const [openDropdownTodoId, setOpenDropdownTodoId] = useState('');
 	const [draggingTodoId, setDraggingTodoId] = useState('');
 	const [draggingGroup, setDraggingGroup] = useState<GroupName | ''>('');
 	const [dropBeforeTodoId, setDropBeforeTodoId] = useState('');
@@ -287,19 +306,43 @@ function Workspace() {
 			})
 			.then(theme => {
 				const root = document.documentElement;
-				root.style.setProperty('--note-inline-code-bg', theme.inlineCodeBackground);
-				root.style.setProperty('--note-code-bg', theme.background);
-				root.style.setProperty('--note-code-border', theme.codeBorder);
-				root.style.setProperty('--note-code-fg', theme.foreground);
-				root.style.setProperty('--note-code-cursor', theme.cursorColor);
-				root.style.setProperty('--note-code-selection-bg', theme.selectionBackground);
-				root.style.setProperty('--note-code-selection-fg', theme.selectionForeground);
-				root.style.setProperty('--note-code-comment', theme.comment);
-				root.style.setProperty('--note-code-string', theme.string);
-				root.style.setProperty('--note-code-number', theme.number);
-				root.style.setProperty('--note-code-keyword', theme.keyword);
-				root.style.setProperty('--note-code-symbol', theme.symbol);
-				root.style.setProperty('--note-code-meta', theme.meta);
+				const pickColor = (...candidates: Array<string | undefined>) => {
+					for (const value of candidates) {
+						if (typeof value === 'string' && value.trim()) {
+							return value;
+						}
+					}
+					return '';
+				};
+				const useReadableCursorColor = (color: string) => {
+					const hex = color.trim();
+					if (!/^#([0-9a-fA-F]{6})$/.test(hex)) {
+						return color;
+					}
+					const r = parseInt(hex.slice(1, 3), 16);
+					const g = parseInt(hex.slice(3, 5), 16);
+					const b = parseInt(hex.slice(5, 7), 16);
+					const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+					return luminance > 0.82 ? '#111111' : color;
+				};
+				const codeBg = pickColor(theme.background, '#222222');
+				const codeFg = pickColor(theme.foreground, theme.white, theme.brightWhite, '#ffffff');
+				const cursor = pickColor(theme.cursorColor, '#000000');
+				root.style.setProperty('--note-inline-code-bg', pickColor(theme.inlineCodeBackground, 'rgba(34, 34, 34, 0.08)'));
+				root.style.setProperty('--note-code-bg', codeBg);
+				root.style.setProperty('--note-code-border', pickColor(theme.codeBorder, 'rgba(34, 34, 34, 0.12)'));
+				root.style.setProperty('--note-code-fg', codeFg);
+				root.style.setProperty('--note-code-cursor', useReadableCursorColor(cursor));
+				root.style.setProperty('--note-code-selection-bg', pickColor(theme.selectionBackground, 'rgba(196, 127, 213, 0.28)'));
+				root.style.setProperty('--note-code-selection-fg', pickColor(theme.selectionForeground, codeFg));
+				root.style.setProperty('--note-code-comment', pickColor(theme.comment, theme.brightBlack, theme.black, '#666666'));
+				root.style.setProperty('--note-code-string', pickColor(theme.string, theme.green, theme.brightGreen, '#91d4a8'));
+				root.style.setProperty('--note-code-number', pickColor(theme.number, theme.yellow, theme.brightYellow, '#e9be74'));
+				root.style.setProperty('--note-code-keyword', pickColor(theme.keyword, theme.red, theme.brightRed, '#7fb6ed'));
+				root.style.setProperty('--note-code-title', pickColor(theme.title, theme.blue, theme.brightBlue, theme.keyword, '#7fb6ed'));
+				root.style.setProperty('--note-code-builtin', pickColor(theme.builtin, theme.cyan, theme.brightCyan, theme.symbol, '#5edee3'));
+				root.style.setProperty('--note-code-symbol', pickColor(theme.symbol, theme.cyan, theme.brightCyan, '#5edee3'));
+				root.style.setProperty('--note-code-meta', pickColor(theme.meta, theme.purple, theme.brightPurple, '#f88aaf'));
 			})
 			.catch(() => undefined);
 	}, []);
@@ -349,6 +392,10 @@ function Workspace() {
 		setDragPreview(null);
 		dragStateRef.current.dropBeforeTodoId = '';
 		dragStateRef.current.lastUpdateTime = 0;
+	}
+
+	function setTodoDropdownOpen(todoId: string, open: boolean) {
+		setOpenDropdownTodoId(open ? todoId : '');
 	}
 
 	function beginDrag(todoId: string, groupName: GroupName) {
@@ -976,6 +1023,8 @@ function Workspace() {
 													handleDeleteTodo={() => handleDeleteTodo(todo)}
 													handleMarkImportant={() => handleMarkImportant(todo)}
 													onPointerDragStart={event => beginPointerDrag(todo, GROUP_IMPORTANT, event)}
+													dropdownOpen={openDropdownTodoId === todo.id}
+													onDropdownOpenChange={open => setTodoDropdownOpen(todo.id, open)}
 													isDropTarget={dropBeforeTodoId === todo.id}
 													isDragging={draggingTodoId === todo.id}
 												shiftDirection={getShiftDirection(todo.id, importantTodos, GROUP_IMPORTANT)}
@@ -1002,6 +1051,8 @@ function Workspace() {
 										handleDeleteTodo={() => handleDeleteTodo(todo)}
 										handleMarkImportant={() => handleMarkImportant(todo)}
 										onPointerDragStart={event => beginPointerDrag(todo, GROUP_TASKS, event)}
+										dropdownOpen={openDropdownTodoId === todo.id}
+										onDropdownOpenChange={open => setTodoDropdownOpen(todo.id, open)}
 										isDropTarget={dropBeforeTodoId === todo.id}
 										isDragging={draggingTodoId === todo.id}
 										shiftDirection={getShiftDirection(todo.id, taskTodos, GROUP_TASKS)}
@@ -1028,6 +1079,8 @@ function Workspace() {
 												handleDeleteTodo={() => handleDeleteTodo(todo)}
 												handleMarkImportant={() => handleMarkImportant(todo)}
 												onPointerDragStart={event => beginPointerDrag(todo, GROUP_COMPLETED, event)}
+												dropdownOpen={openDropdownTodoId === todo.id}
+												onDropdownOpenChange={open => setTodoDropdownOpen(todo.id, open)}
 												isDropTarget={dropBeforeTodoId === todo.id}
 												isDragging={draggingTodoId === todo.id}
 												shiftDirection={getShiftDirection(todo.id, completedTodos, GROUP_COMPLETED)}

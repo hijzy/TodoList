@@ -1,4 +1,4 @@
-import { FormEvent, PointerEvent, useEffect, useState } from 'react';
+import { FormEvent, PointerEvent, useEffect } from 'react';
 
 type Todo = {
 	id: string;
@@ -19,6 +19,8 @@ type ItemCardProps = {
 	handleDeleteTodo: () => void;
 	handleMarkImportant: () => void;
 	onPointerDragStart: (event: PointerEvent<HTMLButtonElement>) => void;
+	dropdownOpen: boolean;
+	onDropdownOpenChange: (open: boolean) => void;
 	isDragging: boolean;
 	isDropTarget: boolean;
 	shiftDirection: 'up' | 'down' | '';
@@ -26,7 +28,6 @@ type ItemCardProps = {
 };
 
 function ItemCard(props: ItemCardProps) {
-	const [dropdownOpen, setDropdownOpen] = useState(false);
 	const timeText = props.todo.completed ? props.formatTimestamp(props.todo.completedAt) : props.formatTimestamp(props.todo.createdAt);
 
 	useEffect(() => {
@@ -36,21 +37,21 @@ function ItemCard(props: ItemCardProps) {
 				return;
 			}
 			if (!target.closest('.dropdown')) {
-				setDropdownOpen(false);
+				props.onDropdownOpenChange(false);
 			}
 		};
 		document.addEventListener('mousedown', handleClickOutside);
 		return () => {
 			document.removeEventListener('mousedown', handleClickOutside);
 		};
-	}, []);
+	}, [props.onDropdownOpenChange]);
 
 	const itemClassName = [
 		'todo-item',
 		props.todo.completed ? 'completed' : '',
 		props.todo.important ? 'is-important' : '',
 		props.todo.editing ? 'is-editing' : '',
-		dropdownOpen ? 'dropdown-open' : '',
+		props.dropdownOpen ? 'dropdown-open' : '',
 		props.isDragging ? 'dragging' : '',
 		props.isDropTarget ? 'drop-before' : '',
 		props.shiftDirection === 'down' ? 'shift-down' : '',
@@ -146,7 +147,7 @@ function ItemCard(props: ItemCardProps) {
 
 				<div className="dropdown dropdown-slot">
 					<div className="tooltip-wrapper">
-						<button type="button" className="no-fill-icon-button" onClick={() => setDropdownOpen(!dropdownOpen)} aria-label="More options" aria-expanded={dropdownOpen}>
+						<button type="button" className="no-fill-icon-button" onClick={() => props.onDropdownOpenChange(!props.dropdownOpen)} aria-label="More options" aria-expanded={props.dropdownOpen}>
 							<span className="glyph-icon more-glyph" aria-hidden="true">•••</span>
 						</button>
 						<div className="tooltip">
@@ -154,12 +155,12 @@ function ItemCard(props: ItemCardProps) {
 						</div>
 					</div>
 
-					<div className={`dropdown-content ${dropdownOpen ? 'show' : ''}`}>
+					<div className={`dropdown-content ${props.dropdownOpen ? 'show' : ''}`}>
 						<button
 							type="button"
-							tabIndex={dropdownOpen ? 0 : -1}
+							tabIndex={props.dropdownOpen ? 0 : -1}
 							onClick={() => {
-								setDropdownOpen(false);
+								props.onDropdownOpenChange(false);
 								props.handleEditTodo();
 							}}
 							className="dropdown-item"
@@ -173,9 +174,9 @@ function ItemCard(props: ItemCardProps) {
 
 						<button
 							type="button"
-							tabIndex={dropdownOpen ? 0 : -1}
+							tabIndex={props.dropdownOpen ? 0 : -1}
 							onClick={() => {
-								setDropdownOpen(false);
+								props.onDropdownOpenChange(false);
 								props.handleCompleteTodo();
 							}}
 							className="dropdown-item"
@@ -189,9 +190,9 @@ function ItemCard(props: ItemCardProps) {
 
 						<button
 							type="button"
-							tabIndex={dropdownOpen ? 0 : -1}
+							tabIndex={props.dropdownOpen ? 0 : -1}
 							onClick={() => {
-								setDropdownOpen(false);
+								props.onDropdownOpenChange(false);
 								props.handleMarkImportant();
 							}}
 							className="dropdown-item"
@@ -204,9 +205,9 @@ function ItemCard(props: ItemCardProps) {
 
 						<button
 							type="button"
-							tabIndex={dropdownOpen ? 0 : -1}
+							tabIndex={props.dropdownOpen ? 0 : -1}
 							onClick={() => {
-								setDropdownOpen(false);
+								props.onDropdownOpenChange(false);
 								props.handleDeleteTodo();
 							}}
 							className="dropdown-item danger"
